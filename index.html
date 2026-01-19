@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Laboratorio Asincronismo - Contact Manager</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh; padding: 20px;
+    }
+    .container { max-width: 700px; margin: 0 auto; }
+    
+    /* SPLASH SCREEN - PARTE 1 */
+    .splash { 
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+      background: linear-gradient(135deg, #4a90e2, #357abd);
+      display: flex; flex-direction: column; justify-content: center; 
+      align-items: center; z-index: 1000; color: white; text-align: center;
+    }
+    .spinner { 
+      width: 60px; height: 60px; border: 5px solid rgba(255,255,255,0.3); 
+      border-top: 5px solid white; border-radius: 50%; 
+      animation: spin 1s linear infinite; margin-bottom: 30px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .splash-error { background: linear-gradient(135deg, #ff6b6b, #ee5a52); }
+    
+    /* APP PRINCIPAL */
+    header { 
+      background: #4a90e2; color: white; padding: 25px; 
+      border-radius: 16px; margin-bottom: 25px; text-align: center; 
+      box-shadow: 0 8px 32px rgba(74, 144, 226, 0.3);
+    }
+    .stats { 
+      background: #f8f9fa; padding: 20px; border-radius: 12px; 
+      margin-bottom: 25px; color: #333; font-weight: 600;
+    }
+    
+    /* BOTONES - PARTE 2 */
+    .load-btns { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
+    .load-btn { 
+      background: linear-gradient(135deg, #28a745, #20c997); 
+      color: white; border: none; padding: 14px 28px; border-radius: 12px; 
+      cursor: pointer; font-size: 16px; font-weight: 600; transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    }
+    .load-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4); }
+    .load-btn:disabled { background: #6c757d; cursor: not-allowed; transform: none; }
+    .service-btn { background: linear-gradient(135deg, #007bff, #0056b3); }
+    
+    /* ESTADOS - PARTE 2.2 */
+    .loading { 
+      text-align: center; padding: 60px 20px; color: #666; 
+      background: white; border-radius: 12px; margin-bottom: 20px;
+    }
+    .spinner-small { width: 30px; height: 30px; border-width: 3px; margin: 0 auto 20px; }
+    .error-msg { 
+      background: linear-gradient(135deg, #f8d7da, #f5c6cb); 
+      color: #721c24; padding: 20px; border-radius: 12px; 
+      border-left: 6px solid #dc3545; margin-bottom: 20px;
+    }
+    .success-msg { 
+      background: linear-gradient(135deg, #d4edda, #c3e6cb); 
+      color: #155724; padding: 20px; border-radius: 12px; 
+      border-left: 6px solid #28a745; margin-bottom: 20px;
+    }
+    
+    /* CONTACTOS */
+    .contact-card { 
+      background: white; padding: 25px; border-radius: 16px; 
+      margin-bottom: 20px; box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+      border-left: 5px solid #4a90e2;
+    }
+    .contact-name { color: #4a90e2; font-size: 22px; margin-bottom: 10px; }
+    .contact-details { display: flex; gap: 20px; font-size: 14px; color: #666; }
+    
+    /* SERVICE STATS - PARTE 3 */
+    .service-stats { 
+      background: linear-gradient(135deg, #e9ecef, #dee2e6); 
+      padding: 20px; border-radius: 12px; font-size: 14px; 
+      border-left: 5px solid #007bff;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ========================================
+    // PARTE 1.1 - UTILIDADES (initializer.js)
+    // ========================================
+    function initializeApp(duration = 3000) {
+      console.log('🔄 Iniciando app...');
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          console.log('✅ App inicializada');
+          resolve(false); // Loading terminado
+        }, duration);
+      });
+    }
+
+    function loadAppData() {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          const success = Math.random() > 0.5; // 50% falla
+          success ? resolve(false) : reject('Error de red');
+        }, 2000);
+      });
+    }
+
+    // ========================================
+    // PARTE 3.1 - SERVICE LAYER (contactService.js)
+    // ========================================
+    class ContactService {
+      constructor() {
+        this.apiUrl = 'https://entermocks.vercel.app/api/contacts';
+        this.requestCount = 0;
+        this.lastSuccess = null;
+        this.retryCount = 0;
+      }
+      
+      async fetchContacts() {
+        this.requestCount++;
+        console.log(`📡 Service request #${this.requestCount}`);
+        
+        try {
+          const response = await fetch(this.apiUrl, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          const data = await response.json();
+          
+          // Transformación de datos
+          const formatted = data.map(contact => ({
+            id: contact.id,
+            name: contact.name,
+            phone: contact.phone?.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3') || 'N/A',
+            email: contact.email
+          }));
+          
+          this.lastSuccess = new Date().toLocaleString();
+          this.retryCount = 0;
+          
+          return { 
+            contacts: formatted.slice(0, 8), 
+            metadata: { 
+              count: formatted.length, 
+              timestamp: new Date().toISOString()
+            } 
+          };
+        } catch (error) {
+          this.retryCount++;
+          if (this.retryCount <= 1) {
+            console.log('🔄 Retry automático...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return this.fetchContacts(); // PARTE 3B - RETRY
+          }
+          throw new Error(`Service Error: ${error.message}`);
+        }
+      }
+      
+      getStats() {
+        return {
+          requestCount: this.requestCount,
+          lastSuccess: this.lastSuccess,
+          retryCount: this.retryCount,
+          apiUrl: this.apiUrl
+        };
+      }
+      
+      // PARTE 3A - Reto Autónomo
+      async searchContacts(query) {
+        const result = await this.fetchContacts();
+        return result.contacts.filter(contact => 
+          contact.name.toLowerCase().includes(query.toLowerCase())
+        );
+      }
+    }
+
+    const contactService = new ContactService();
+
+    // ========================================
+    // PARTE 1.2 - SPLASH SCREEN
+    // ========================================
+    function SplashScreen({ isLoading, error }) {
+      if (!isLoading) return null;
+      
+      return (
+        <div className={`splash ${error ? 'splash-error' : ''}`}>
+          <div className="spinner"></div>
+          {error ? (
+            <>
+              <h2>❌ Error de Inicialización</h2>
+              <p>{error}</p>
+              <p style={{ fontSize: '14px', opacity: 0.9 }}>
+                Verifica tu conexión e intenta nuevamente
+              </p>
+            </>
+          ) : (
+            <>
+              <h2>📇 Iniciando Contact Manager...</h2>
+              <p style={{ fontSize: '16px', opacity: 0.9 }}>
+                Preparando servicios y conectando API...
+              </p>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // PARTE 2 - CONTACT LIST CON FETCH + SERVICE
+    // ========================================
+    function ContactList() {
+      const [contacts, setContacts] = React.useState([]);
+      const [isLoading, setIsLoading] = React.useState(false);
+      const [error, setError] = React.useState(null);
+      const [fetchCount, setFetchCount] = React.useState(0);
+      const [lastLoad, setLastLoad] = React.useState(null);
+      const [useService, setUseService] = React.useState(false);
+
+      // PARTE 2.1 - FETCH DIRECTO
+      const fetchContactsDirectly = async () => {
+        setIsLoading(true);
+        setError(null);
+        setUseService(false);
+        
+        try {
+          console.log('📡 Fetch directo...');
+          const response = await fetch(contactService.apiUrl);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const data = await response.json();
+          setContacts(data.slice(0, 8));
+          setFetchCount(prev => prev + 1);
+          setLastLoad(new Date().toLocaleTimeString());
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      // PARTE 3.2 - FETCH CON SERVICE LAYER
+      const fetchWithService = async () => {
+        setIsLoading(true);
+        setError(null);
+        setUseService(true);
+        
+        try {
+          console.log('🛠️ Service Layer...');
+          const result = await contactService.fetchContacts();
+          setContacts(result.contacts);
+          setFetchCount(prev => prev + 1);
+          setLastLoad(new Date().toLocaleTimeString());
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      const stats = contactService.getStats();
+
+      return (
+        <div>
+          {/* PARTE 2.2 - BOTONES */}
+          <div className="load-btns">
+            <button 
+              className="load-btn" 
+              onClick={fetchContactsDirectly} 
+              disabled={isLoading}
+            >
+              📡 Fetch Directo ({fetchCount})
+            </button>
+            <button 
+              className={`load-btn service-btn ${useService ? 'active' : ''}`}
+              onClick={fetchWithService} 
+              disabled={isLoading}
+            >
+              🛠️ Service Layer
+            </button>
+            <button 
+              className="load-btn" 
+              onClick={() => console.log(stats)}
+              style={{ fontSize: '14px', padding: '14px 20px' }}
+            >
+              📊
+            </button>
+          </div>
+
+          {/* PARTE 2.2 - ESTADOS */}
+          {isLoading && (
+            <div className="loading">
+              <div className="spinner spinner-small"></div>
+              <h3>Cargando contactos desde API...</h3>
+              <p>{useService ? 'Service Layer activo' : 'Fetch directo'}</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="error-msg">
+              ❌ <strong>{error}</strong>
+              <div style={{ marginTop: '15px' }}>
+                <button 
+                  className="load-btn" 
+                  onClick={fetchWithService}
+                  style={{ padding: '8px 16px', fontSize: '14px' }}
+                >
+                  🔄 Reintentar con Service
+                </button>
+              </div>
+            </div>
+          )}
+
+          {contacts.length === 0 && !isLoading && !error && (
+            <div className="loading">
+              <h3>No hay contactos cargados</h3>
+              <p>Haz clic en "Fetch Directo" o "Service Layer"</p>
+            </div>
+          )}
+
+          {/* CONTACTOS */}
+          {contacts.map(contact => (
+            <div key={contact.id} className="contact-card">
+              <div>
+                <h3 className="contact-name">{contact.name}</h3>
+                <div className="contact-details">
+                  <span>📞 {contact.phone}</span>
+                  <span>📧 {contact.email}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* PARTE 2A/2B - STATS */}
+          {lastLoad && (
+            <div className="success-msg">
+              ✅ <strong>Última carga exitosa:</strong> {lastLoad} 
+              | Total requests: {fetchCount}
+            </div>
+          )}
+
+          {/* PARTE 3 - SERVICE STATS */}
+          <div className="service-stats">
+            <strong>🛠️ Service Layer Stats:</strong><br/>
+            Requests: {stats.requestCount} | 
+            Retries: {stats.retryCount} | 
+            Último éxito: {stats.lastSuccess || 'Ninguno'}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // PARTE 1.3/1.4 - APP PRINCIPAL
+    // ========================================
+    function App() {
+      const [isInitializing, setIsInitializing] = React.useState(true);
+      const [initError, setInitError] = React.useState(null);
+
+      React.useEffect(() => {
+        async function startApp() {
+          try {
+            // PARTE 1.1 - PROMESA PERSONALIZADA
+            await initializeApp(4000);
+            
+            // PARTE 1 Reto - loadAppData con posible error
+            await loadAppData();
+            
+            console.log('🚀 App completamente inicializada');
+            setIsInitializing(false);
+          } catch (error) {
+            console.error('❌ Init error:', error);
+            setInitError(error);
+            setTimeout(() => setIsInitializing(false), 3000);
+          }
+        }
+        
+        startApp();
+      }, []);
+
+      return (
+        <div className="container">
+          {/* PARTE 1.4 - RENDER CONDICIONAL */}
+          <SplashScreen isLoading={isInitializing} error={initError} />
+          
+          {/* CONTENIDO PRINCIPAL */}
+          {!isInitializing && (
+            <>
+              <header>
+                <h1>📱 Contact Manager Pro</h1>
+                <p>Splash + Fetch + Service Layer Pattern</p>
+              </header>
+              
+              <div className="stats">
+                ✅ <strong>App inicializada correctamente</strong> | 
+                Listo para cargar contactos desde API REST
+              </div>
+              
+              <ContactList />
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // Renderizar
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
